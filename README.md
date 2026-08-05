@@ -6,8 +6,8 @@ interactiva (mini-dashboard con gráfico de barras y un selector para alternar
 entre los datasets *Ventas* y *Visitas*) que se renderiza dentro de la
 conversación del host, siguiendo la extensión oficial **MCP Apps** (SEP-1865).
 
-- **Framework de servidor:** [`fastmcp`](https://gofastmcp.com)
-- **UI del tool:** [`mcp-ui-server`](https://pypi.org/project/mcp-ui-server/) con `create_ui_resource` y content type `rawHtml`
+- **Framework de servidor:** [`fastmcp`](https://gofastmcp.com) (soporte nativo MCP Apps: `fastmcp.apps`)
+- **UI del tool:** recurso `ui://` **predeclarado** (SEP-1865) con mimeType `text/html;profile=mcp-app`, enlazado desde el tool vía `AppConfig`
 - **Python:** 3.10+ · **Gestor de dependencias:** [`uv`](https://docs.astral.sh/uv/)
 
 > El cambio de dataset se resuelve **íntegramente en el cliente** (JS dentro del
@@ -18,11 +18,23 @@ conversación del host, siguiendo la extensión oficial **MCP Apps** (SEP-1865).
 
 ## ¿Qué es una "MCP App"?
 
-MCP Apps (SEP-1865) es la extensión oficial de MCP que permite que un tool
-devuelva una interfaz de usuario (HTML) que el host renderiza en un iframe
-aislado, en lugar de solo texto. Esta demo usa el enfoque de **recurso UI
-embebido** de `mcp-ui-server`: el tool devuelve un `UIResource` de tipo
-`rawHtml` que los hosts compatibles con MCP Apps / mcp-ui saben pintar.
+MCP Apps (SEP-1865, id `io.modelcontextprotocol/ui`) es la extensión oficial de
+MCP que permite que un tool muestre una interfaz de usuario (HTML) que el host
+renderiza en un iframe aislado, en lugar de solo texto.
+
+Esta demo usa el modelo **predeclarado** que adopta SEP-1865:
+
+1. La UI se registra como un **recurso** MCP en `ui://panel-metricas/dashboard`
+   con mimeType `text/html;profile=mcp-app`.
+2. El tool `panel_metricas` **no** devuelve el HTML embebido: lo **referencia**
+   vía `_meta.ui.resourceUri` (lo hace `fastmcp.apps.AppConfig`). El host
+   compatible hace `resources/read` de ese `ui://` y lo pinta.
+
+> **Embebido vs. predeclarado.** El estilo "recurso embebido en el resultado del
+> tool" (mcp-ui clásico, `create_ui_resource`) quedó **deferido** por SEP-1865;
+> algunos hosts (Claude Desktop) solo renderizan el modelo predeclarado. Por eso
+> esta demo usa el soporte nativo de `fastmcp` (`fastmcp.apps`) y no
+> `mcp-ui-server`.
 
 ---
 
@@ -168,10 +180,11 @@ expone hooks de observabilidad para facilitar esa comprobación sin leer píxele
   recursos que no le corresponden (confused deputy). Ver el bloque de nota en
   `server.py`.
 
-- **Mínimo privilegio (least privilege).** Si se añadieran tools que **solo**
-  debe invocar la interfaz (y no el modelo), se marcarían con
-  `AppConfig(visibility=["app"])` para que no aparezcan en la lista de tools que
-  ve el modelo:
+- **Mínimo privilegio (least privilege).** El tool `panel_metricas` usa
+  `AppConfig(resourceUri=..., visibility=["model", "app"])`: visible al modelo
+  (para que pueda invocarlo) y a la app. Si se añadieran tools que **solo** debe
+  invocar la interfaz (y no el modelo), se marcarían con `visibility=["app"]`
+  para que no aparezcan en la lista de tools que ve el modelo:
 
   ```python
   from fastmcp.apps import AppConfig
@@ -181,10 +194,7 @@ expone hooks de observabilidad para facilitar esa comprobación sin leer píxele
   ```
 
   *Por qué:* reduce la superficie de lo que el modelo puede llamar directamente.
-  En esta demo **no** hace falta: hay un único tool y el cambio de dataset es JS
-  del cliente, así que no se añade un tool que no se usa. (Nota: `AppConfig` es un
-  concepto *native-apps* de `fastmcp` y no se mezcla con `create_ui_resource`;
-  por eso aquí solo se documenta.)
+  (Nota: la visibilidad es metadata; el filtrado final lo aplica el host.)
 
 - **Nada de secretos en el código.** No hay claves ni credenciales. La
   configuración sensible (si la hubiera) se lee de **variables de entorno**
@@ -198,7 +208,7 @@ expone hooks de observabilidad para facilitar esa comprobación sin leer píxele
 
 - **Type hints y manejo de errores.** Funciones tipadas y validaciones con
   errores claros (`ValueError`/`FileNotFoundError`) en el proveedor y el
-  renderizador. Sin dependencias sin usar (solo `fastmcp` y `mcp-ui-server`).
+  renderizador. Sin dependencias sin usar (solo `fastmcp`).
 
 - **Reproducibilidad con `uv` + `uv.lock`.** El lockfile fija todas las versiones
   (incluidas transitivas). *Por qué:* mismos builds en local, en CI y en Docker.
@@ -222,11 +232,18 @@ expone hooks de observabilidad para facilitar esa comprobación sin leer píxele
 
 ---
 
-## Compatibilidad
+## Compatibilidad de hosts
 
-El `UIResource` se renderiza en hosts que soporten la extensión **MCP Apps** /
-`mcp-ui`. En hosts que aún no la soporten, el tool sigue siendo válido pero la
-interfaz puede mostrarse como recurso en lugar de renderizarse.
+La interfaz se renderiza en hosts que soporten la extensión **MCP Apps**
+(SEP-1865) con el modelo de **recurso `ui://` predeclarado**:
+
+- **Claude Desktop** — registra el servidor por stdio (ver arriba) y, al llamar
+  al tool, pinta el iframe a partir del recurso `ui://panel-metricas/dashboard`.
+- En hosts que aún no soporten MCP Apps, el tool sigue siendo válido pero la
+  interfaz puede no renderizarse (se muestra el texto de respuesta).
+
+Si quieres ver el dashboard sin un host MCP, abre **`preview.html`** o el
+endpoint **`/preview`** en el navegador (es el mismo HTML).
 
 ## Licencia
 

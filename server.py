@@ -3,8 +3,18 @@
 Este módulo es la capa de composición/wiring: instancia el framework MCP
 (`fastmcp`), inyecta las implementaciones concretas del dominio
 (`InMemoryMetricsProvider`, `HtmlDashboardRenderer`) tras sus abstracciones y
-publica el tool que devuelve la interfaz interactiva como MCP App
-(extensión oficial MCP Apps / SEP-1865), usando `mcp-ui-server`.
+publica la interfaz interactiva siguiendo la extensión oficial **MCP Apps**
+(SEP-1865, id `io.modelcontextprotocol/ui`).
+
+Modelo usado: **recurso `ui://` predeclarado** (no embebido).
+    * La UI se registra como un recurso MCP en `ui://panel-metricas/dashboard`
+      con mimeType `text/html;profile=mcp-app`.
+    * El tool `panel_metricas` NO devuelve el HTML embebido: lo referencia vía
+      `_meta.ui.resourceUri` (lo hace `AppConfig`). El host compatible
+      (p.ej. Claude Desktop) hace `resources/read` de ese `ui://` y lo pinta en
+      un iframe aislado.
+Este es el modelo que adopta SEP-1865; el estilo "recurso embebido en el
+resultado del tool" (mcp-ui clásico) quedó deferido y varios hosts no lo pintan.
 
 ──────────────────────────────────────────────────────────────────────────────
 NOTA DE AUTORIZACIÓN (importante para cuando esto deje de ser una demo)
@@ -18,7 +28,7 @@ hay que seguir la spec de autorización de MCP:
     Resource Indicators (RFC 8707); validar la audiencia en CADA llamada.
   * Nunca reenviar ("passthrough") a otro servidor un token emitido para uno
     distinto.
-  * Aplicar el principio de mínimo privilegio (ver README, sección AppConfig).
+  * Aplicar el principio de mínimo privilegio (ver README, sección visibility).
 
 Además: nada de secretos en el código. Cualquier credencial futura debe leerse
 de variables de entorno (ver `os.environ` más abajo para el transporte).
@@ -29,8 +39,7 @@ from __future__ import annotations
 import os
 
 from fastmcp import FastMCP
-from mcp_ui_server import create_ui_resource
-from mcp_ui_server.core import UIResource
+from fastmcp.apps import UI_MIME_TYPE, AppConfig
 
 from metrics_app import (
     DashboardRenderer,
@@ -40,13 +49,12 @@ from metrics_app import (
 )
 
 # URI de la MCP App. Por convención de la extensión MCP Apps debe empezar por
-# `ui://`. Es estable para que los hosts puedan cachear/identificar la app.
+# `ui://`. Es estable para que el host pueda cachear/identificar la app.
 _APP_URI = "ui://panel-metricas/dashboard"
 
 # --- Composición (Dependency Injection) --------------------------------------
-# El tool depende de las abstracciones `MetricsProvider` y `DashboardRenderer`
-# (DIP); aquí se eligen las implementaciones concretas. Cambiarlas no obliga a
-# tocar la lógica del tool.
+# El tool y el recurso dependen de las abstracciones `MetricsProvider` y
+# `DashboardRenderer` (DIP); aquí se eligen las implementaciones concretas.
 _provider: MetricsProvider = InMemoryMetricsProvider()
 _renderer: DashboardRenderer = HtmlDashboardRenderer()
 
@@ -58,46 +66,39 @@ def _build_dashboard_html() -> str:
     return _renderer.render(_provider.get_datasets())
 
 
-@mcp.tool()
-def panel_metricas() -> list[UIResource]:
+@mcp.resource(_APP_URI, mime_type=UI_MIME_TYPE)
+def dashboard_ui() -> str:
+    """Recurso UI predeclarado (MCP Apps / SEP-1865).
+
+    Devuelve el HTML autocontenido del mini-dashboard (gráfico de barras +
+    selector Ventas/Visitas). El host lo carga en un iframe aislado cuando el
+    tool `panel_metricas` lo referencia. Los datos van embebidos en el propio
+    HTML y el cambio de dataset se resuelve en JS del cliente (sin más red).
+    """
+    return _build_dashboard_html()
+
+
+@mcp.tool(app=AppConfig(resourceUri=_APP_URI, visibility=["model", "app"]))
+def panel_metricas() -> str:
     """Muestra un panel de métricas interactivo como interfaz embebida (MCP App).
 
     QUÉ HACE:
-        Devuelve un mini-dashboard renderizable dentro de la conversación: un
+        Abre un mini-dashboard renderizable dentro de la conversación: un
         gráfico de barras con un selector para alternar entre dos datasets de
-        negocio ("Ventas" y "Visitas"). Todo el cambio de dataset se resuelve en
-        el propio cliente (JS del iframe), sin más llamadas al servidor.
+        negocio ("Ventas" y "Visitas"). La interfaz vive en el recurso
+        `ui://panel-metricas/dashboard`; este tool solo la referencia (vía
+        `_meta.ui.resourceUri`) para que el host la pinte.
 
     CUÁNDO USARLO:
         Cuando el usuario pida ver, visualizar, graficar o comparar métricas de
         negocio (ventas y/o visitas), o pida "un panel"/"un dashboard". No lo
-        uses para preguntas que se respondan solo con texto o con un número
-        suelto.
+        uses para preguntas que se respondan solo con texto o un número suelto.
 
     Returns:
-        Una lista con un único `UIResource` de tipo HTML embebido (rawHtml) que
-        el host compatible con MCP Apps renderiza como interfaz interactiva.
+        Un texto breve de confirmación. La interfaz se renderiza a partir del
+        recurso UI enlazado, no del texto devuelto aquí.
     """
-    resource = create_ui_resource(
-        {
-            "uri": _APP_URI,
-            "content": {"type": "rawHtml", "htmlString": _build_dashboard_html()},
-            "encoding": "text",
-        }
-    )
-    return [resource]
-
-
-@mcp.custom_route("/preview", methods=["GET"])
-async def preview(_request):  # type: ignore[no-untyped-def]
-    """Sirve el mismo HTML del panel por HTTP para previsualizar en el navegador.
-
-    Útil cuando el servidor corre en un contenedor (ver docker-compose): permite
-    abrir `http://localhost:8000/preview` sin necesidad de un host MCP.
-    """
-    from starlette.responses import HTMLResponse
-
-    return HTMLResponse(_build_dashboard_html())
+    return "Panel de métricas listo: usa el selector para alternar entre Ventas y Visitas."
 
 
 def main() -> None:
@@ -116,6 +117,18 @@ def main() -> None:
     host = os.environ.get("MCP_HOST", "127.0.0.1")
     port = int(os.environ.get("MCP_PORT", "8000"))
     mcp.run(transport=transport, host=host, port=port)
+
+
+@mcp.custom_route("/preview", methods=["GET"])
+async def preview(_request):  # type: ignore[no-untyped-def]
+    """Sirve el mismo HTML del panel por HTTP para previsualizar en el navegador.
+
+    Útil cuando el servidor corre en un contenedor (ver docker-compose): permite
+    abrir `http://localhost:8000/preview` sin necesidad de un host MCP.
+    """
+    from starlette.responses import HTMLResponse
+
+    return HTMLResponse(_build_dashboard_html())
 
 
 if __name__ == "__main__":
