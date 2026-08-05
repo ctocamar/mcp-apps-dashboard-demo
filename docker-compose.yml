@@ -1,0 +1,20 @@
+# Levanta la demo con un único contenedor:
+#   docker compose up --build
+#
+# Endpoints:
+#   - MCP (streamable-http):  http://localhost:8000/mcp
+#   - Previsualización HTML:  http://localhost:8000/preview
+services:
+  mcp:
+    build: .
+    container_name: mcp-apps-dashboard-demo
+    ports:
+      - "8000:8000"
+    environment:
+      # Transporte y bind del servidor MCP. No hay secretos: si en el futuro
+      # hicieran falta credenciales, se inyectarían aquí como variables de
+      # entorno (nunca hardcodeadas en la imagen).
+      MCP_TRANSPORT: streamable-http
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "8000"
+    restart: unless-stopped

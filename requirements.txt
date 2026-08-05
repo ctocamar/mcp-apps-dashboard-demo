@@ -1,0 +1,5 @@
+# Dependencias directas (para quien no use uv).
+# La reproducibilidad exacta (versiones transitivas fijadas) está en uv.lock.
+# Instalación sin uv:  pip install -r requirements.txt
+fastmcp>=3.2
+mcp-ui-server>=1.0
