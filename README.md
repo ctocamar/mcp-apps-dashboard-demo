@@ -86,6 +86,56 @@ cambiar los datos o la plantilla:
 uv run python generate_preview.py
 ```
 
+### Uso con Claude Desktop (stdio)
+
+Claude Desktop lanza el servidor **por stdio** (el transporte por defecto de
+este proyecto), así que basta con registrar el comando en su configuración.
+
+1. Abre el fichero de configuración de Claude Desktop:
+   - **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+   - **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+2. Añade el bloque `mcpServers` (ver `claude_desktop_config.example.json`),
+   ajustando la ruta `--directory` a donde tengas clonado el repo:
+
+   ```json
+   {
+     "mcpServers": {
+       "panel-metricas": {
+         "command": "uv",
+         "args": ["run", "--directory", "C:\\ruta\\a\\mcp-apps-dashboard-demo", "python", "server.py"],
+         "env": { "MCP_TRANSPORT": "stdio" }
+       }
+     }
+   }
+   ```
+
+   > Si `uv` no está en el `PATH` de Claude Desktop, usa la ruta absoluta al
+   > ejecutable (p.ej. `%USERPROFILE%\.local\bin\uv.exe` en Windows).
+
+3. Reinicia Claude Desktop. Cuando pidas ver/comparar métricas, el modelo podrá
+   invocar el tool `panel_metricas` y renderizar el dashboard.
+
+**Alternativa con Docker (stdio):** construye la imagen con un tag y deja que
+Claude Desktop lance el contenedor en modo interactivo:
+
+```bash
+docker build -t mcp-apps-dashboard-demo .
+```
+
+```json
+{
+  "mcpServers": {
+    "panel-metricas": {
+      "command": "docker",
+      "args": ["run", "--rm", "-i", "-e", "MCP_TRANSPORT=stdio", "mcp-apps-dashboard-demo"]
+    }
+  }
+}
+```
+
+> `-i` mantiene stdin abierto (necesario para stdio). No expongas puertos aquí:
+> en stdio la comunicación va por la entrada/salida estándar, no por HTTP.
+
 ---
 
 ## Testing
